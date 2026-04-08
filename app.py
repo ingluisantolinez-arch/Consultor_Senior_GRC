@@ -16,10 +16,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# Inicializar llaves de API
 if "GOOGLE_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 else:
-    st.error("⚠️ Error: Configure la API Key en los Secrets.")
+    st.error("⚠️ Error: Configure la 'GOOGLE_API_KEY' en los Secrets de Streamlit.")
     st.stop()
 
 # --- 2. MOTOR DE REPORTES (FPDF2) ---
@@ -50,30 +51,25 @@ def generar_pdf(titulo, datos):
 # --- 3. PANEL LATERAL ---
 with st.sidebar:
     st.header("⚙️ Configuración Senior")
-    st.session_state['sector'] = st.selectbox("Sector Cliente", ["Bancario", "Salud", "Energía", "Tecnología", "Gobierno"])
-    st.session_state['tipo'] = st.selectbox("Módulo de Verificación", [
-        "Verificación de Estándares", "Verificación de Proveedores",
-        "Verificación Cumplimiento Seguridad", "Verificación Protección de Datos"
-    ])
-    archivo = st.file_uploader("Cargar Archivo Base", type=["xlsx", "csv"])
+    sector_input = st.selectbox("Sector Cliente", ["Bancario", "Salud", "Energía", "Tecnología", "Gobierno"])
+    archivo = st.file_uploader("Cargar Archivo Base (Excel)", type=["xlsx"])
 
 # --- 4. INTERFAZ Y LÓGICA ---
 st.title("🛡️ Consola GRC Elite: Verificación & Riesgos")
 
 if archivo:
-    # --- DETECCIÓN DE FILA DE TÍTULOS (Basado en tu imagen, fila 7) ---
+    # Detección de fila de títulos (Buscamos la fila 7 donde están tus datos)
     df_raw = pd.read_excel(archivo, header=None)
     fila_inicio = 0
     for i, row in df_raw.head(20).iterrows():
-        # Buscamos la fila que contiene "ID" o "Hallazgos"
-        if "ID" in row.values or "Hallazgos" in row.values:
+        if "Hallazgos" in row.values or "ID" in row.values:
             fila_inicio = i
             break
     
     df = pd.read_excel(archivo, skiprows=fila_inicio)
     df.columns = df.columns.astype(str).str.strip()
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-    df = df.dropna(subset=["Hallazgos"]) # Solo filas con hallazgos
+    df = df.dropna(subset=["Hallazgos"])
 
     tab1, tab2, tab3, tab4 = st.tabs(["📝 Verificación", "📊 Benchmarking", "🎲 Riesgos", "📥 INFORMES"])
 
@@ -85,27 +81,32 @@ if archivo:
         
         if st.button("🚀 PROCESAR ANÁLISIS"):
             results_v = []
-            with st.spinner("IA Analizando..."):
-                for _, row in df.head(10).iterrows():
-                    prompt = f"Como Auditor Senior, analiza el hallazgo: {row['Hallazgos']} contra el lineamiento: {row[col_lin]}. Define Riesgo e ISO 27001."
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    res = model.generate_content(prompt).text
-                    results_v.append({"header": f"ID {row[col_id]}", "body": res})
-            st.session_state['v_data'] = results_v
-            st.success("Análisis listo.")
+            with st.spinner("IA Analizando hallazgos..."):
+                # Especificamos el modelo con el nombre técnico completo
+                try:
+                    model = genai.GenerativeModel('models/gemini-1.5-flash') 
+                    for _, row in df.head(10).iterrows():
+                        prompt = f"Como Auditor Senior, analiza el hallazgo: {row['Hallazgos']} contra el lineamiento: {row[col_lin]}. Define Riesgo e ISO 27001."
+                        response = model.generate_content(prompt)
+                        results_v.append({"header": f"ID {row[col_id]}", "body": response.text})
+                    st.session_state['v_data'] = results_v
+                    st.success("Análisis completado exitosamente.")
+                except Exception as e:
+                    st.error(f"Error de conexión con la IA: {e}")
+                    st.info("Nota: Verifique que el modelo 'gemini-1.5-flash' esté disponible en su región.")
 
     # --- TAB 3: RIESGOS ---
     with tab3:
         st.subheader("🎲 Matriz de Riesgos")
         if st.button("⚡ GENERAR MATRIZ"):
             results_r = []
-            with st.spinner("Deduciendo riesgos..."):
-                for _, row in df.head(8).iterrows():
-                    p = f"Deduce Riesgo para: '{row['Hallazgos']}'. Responde JSON: id_riesgo, nombre_riesgo, prob(1-5), imp(1-5), sustento."
-                    try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        raw = model.generate_content(p).text
-                        clean_json = raw.replace('```json', '').replace('```', '').strip()
+            with st.spinner("Deduciendo matriz de riesgos..."):
+                try:
+                    model = genai.GenerativeModel('models/gemini-1.5-flash')
+                    for _, row in df.head(8).iterrows():
+                        p = f"Deduce Riesgo para: '{row['Hallazgos']}'. Responde JSON: id_riesgo, nombre_riesgo, prob(1-5), imp(1-5), sustento."
+                        raw_res = model.generate_content(p).text
+                        clean_json = raw_res.replace('```json', '').replace('```', '').strip()
                         resp = json.loads(clean_json)
                         score = int(resp['prob']) * int(resp['imp'])
                         results_r.append({
@@ -113,29 +114,28 @@ if archivo:
                             "body": f"Probabilidad: {resp['prob']} | Impacto: {resp['imp']}\nSustento: {resp['sustento']}",
                             "score": score
                         })
-                    except: continue
-            st.session_state['r_data'] = sorted(results_r, key=lambda x: x.get('score', 0), reverse=True)
-            st.success("Riesgos calculados.")
+                    st.session_state['r_data'] = sorted(results_r, key=lambda x: x.get('score', 0), reverse=True)
+                    st.success("Matriz generada.")
+                except Exception as e:
+                    st.error(f"Error al generar riesgos: {e}")
 
-    # --- TAB 4: INFORMES (EL BOTÓN) ---
+    # --- TAB 4: INFORMES ---
     with tab4:
         st.subheader("📥 Centro de Descarga")
         c1, c2 = st.columns(2)
-        
         with c1:
             st.markdown('<div class="report-card">', unsafe_allow_html=True)
             if 'v_data' in st.session_state:
                 pdf_v = generar_pdf("Informe de Verificación", st.session_state['v_data'])
-                st.download_button("📄 Bajar Informe Auditoría", pdf_v, "Auditoria.pdf", "application/pdf")
+                st.download_button("📄 Bajar Informe Auditoría", pdf_v, "Auditoria.pdf", "application/pdf", key="btn_v")
             else: st.warning("Procesa la Verificación primero.")
             st.markdown('</div>', unsafe_allow_html=True)
-
         with c2:
             st.markdown('<div class="report-card">', unsafe_allow_html=True)
             if 'r_data' in st.session_state:
                 pdf_r = generar_pdf("Matriz de Riesgos", st.session_state['r_data'])
-                st.download_button("🎲 Bajar Matriz de Riesgos", pdf_r, "Riesgos.pdf", "application/pdf")
+                st.download_button("🎲 Bajar Matriz de Riesgos", pdf_r, "Riesgos.pdf", "application/pdf", key="btn_r")
             else: st.warning("Procesa los Riesgos primero.")
             st.markdown('</div>', unsafe_allow_html=True)
 else:
-    st.info("👋 Por favor, carga el archivo en el panel lateral.")
+    st.info("👋 Por favor, carga el archivo Excel en el panel lateral.")
