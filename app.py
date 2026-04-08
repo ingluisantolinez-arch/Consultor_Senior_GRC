@@ -97,4 +97,70 @@ if archivo:
 
     # TAB 1: VERIFICACIÓN
     with tab1:
-        st.subheader("📋
+        st.subheader("📋 Gestión de Hallazgos y Acciones")
+        cols = df.columns.tolist()
+        col_id = st.selectbox("Seleccione ID/Referencia", cols)
+        col_h = st.selectbox("Seleccione Columna de Hallazgo", cols)
+        
+        if st.button("🚀 PROCESAR ANÁLISIS DE VERIFICACIÓN"):
+            results_v = []
+            with st.spinner("Analizando bajo ISO 27002, NIST y COBIT..."):
+                # Limitamos a los primeros 10 para control de cuota
+                for _, row in df.head(10).iterrows():
+                    p = f"Analiza: '{row[col_h]}'. Cita Cláusulas ISO 27002:2022. Identifica BRECHA DOCUMENTAL y Acción Técnica sugerida."
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    try:
+                        res = model.generate_content(p).text
+                        results_v.append({"header": f"Item {row[col_id]}", "body": res})
+                    except: continue
+            st.session_state['v_data'] = results_v
+            st.success("Análisis completado exitosamente.")
+
+    # TAB 3: RIESGOS
+    with tab3:
+        st.subheader("🎲 Análisis de Riesgos ISO 27005")
+        if st.button("⚡ GENERAR MATRIZ DE RIESGOS"):
+            results_r = []
+            with st.spinner("Deduciendo riesgos técnicos..."):
+                for _, row in df.head(8).iterrows():
+                    p = f"Deduce Riesgo para: '{row[col_h]}'. Responde SOLO JSON con: id_riesgo, nombre_riesgo, prob(1-5), imp(1-5), brecha_doc, sustento."
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    try:
+                        raw = model.generate_content(p).text
+                        clean_json = raw.replace('```json', '').replace('```', '').strip()
+                        resp = json.loads(clean_json)
+                        score = int(resp['prob']) * int(resp['imp'])
+                        nivel = "CRÍTICO" if score >= 15 else "MEDIO" if score >= 8 else "BAJO"
+                        results_r.append({
+                            "header": f"{nivel}: {resp['nombre_riesgo']} (Score: {score})",
+                            "body": f"Probabilidad: {resp['prob']} | Impacto: {resp['imp']}\nBrecha: {resp['brecha_doc']}\nAnálisis: {resp['sustento']}",
+                            "score": score
+                        })
+                    except: continue
+            st.session_state['r_data'] = sorted(results_r, key=lambda x: x.get('score', 0), reverse=True)
+            st.success("Matriz de Riesgos generada.")
+
+    # TAB 4: CENTRO DE INFORMES
+    with tab4:
+        st.subheader("📥 Exportación de Entregables")
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.markdown('<div class="report-card">', unsafe_allow_html=True)
+            st.markdown("### 📋 Verificación")
+            if 'v_data' in st.session_state:
+                pdf_v = exportar_informe("Informe de Verificación GRC", st.session_state['v_data'], False)
+                st.download_button("📥 Bajar Informe Técnico", data=pdf_v, file_name="Auditoria_Tecnica.pdf", mime="application/pdf")
+            else: st.warning("Sin datos procesados.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with c2:
+            st.markdown('<div class="report-card">', unsafe_allow_html=True)
+            st.markdown("### 🎲 Riesgos")
+            if 'r_data' in st.session_state:
+                pdf_r = exportar_informe("Matriz de Riesgos Corporativos", st.session_state['r_data'], False)
+                st.download_button("📥 Bajar Matriz de Riesgos", data=pdf_r, file_name="Matriz_Riesgos.pdf", mime="application/pdf")
+            else: st.warning("Sin datos procesados.")
+            st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("👋 Bienvenida a la consola GRC. Cargue un archivo para comenzar.")
