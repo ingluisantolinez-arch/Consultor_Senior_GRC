@@ -2,7 +2,6 @@ import streamlit as st
 import google.generativeai as genai
 import pandas as pd
 from fpdf import FPDF
-import json
 from datetime import datetime
 
 # --- 1. CONFIGURACIÓN ---
@@ -14,7 +13,7 @@ else:
     st.error("⚠️ Configure la API Key en los Secrets.")
     st.stop()
 
-# --- 2. MOTOR DE REPORTES (SINTAXIS FPDF2) ---
+# --- 2. MOTOR DE REPORTES (FPDF2) ---
 class GRC_Report(FPDF):
     def header(self):
         self.set_font('Helvetica', 'B', 10)
@@ -26,10 +25,9 @@ class GRC_Report(FPDF):
         self.set_font('Helvetica', 'I', 8)
         self.cell(0, 10, f'Generado el {datetime.now().strftime("%d/%m/%Y")} | Página {self.page_no()}', 0, 0, 'C')
 
-def exportar_informe(titulo, datos):
+def generar_pdf_bytes(titulo, datos):
     pdf = GRC_Report()
     pdf.add_page()
-    
     pdf.set_font("Helvetica", 'B', 16)
     pdf.set_text_color(31, 111, 235) 
     pdf.cell(0, 15, titulo.upper(), ln=True)
@@ -45,80 +43,69 @@ def exportar_informe(titulo, datos):
         pdf.multi_cell(0, 5, txt=item.get('body', ''))
         pdf.ln(4)
     
-    # IMPORTANTE: Convertimos explícitamente a bytes para evitar el error de Streamlit
     return bytes(pdf.output())
 
 # --- 3. PROCESAMIENTO DE ARCHIVO ---
 archivo = st.sidebar.file_uploader("Cargar prueba1.xlsx", type=["xlsx", "csv"])
 
 if archivo:
-    # 1. Detectar cabecera real (Típicamente fila 7 en tu archivo)
+    # Detectar cabecera en fila 7 (índice 6 de pandas si no hay header)
     df_raw = pd.read_excel(archivo, header=None) if archivo.name.endswith('xlsx') else pd.read_csv(archivo, header=None)
     
     fila_titulos = 0
     for i, row in df_raw.head(15).iterrows():
-        # Buscamos la fila donde aparece la palabra "Hallazgos"
         if "Hallazgos" in row.values:
             fila_titulos = i
             break
     
-    # 2. Cargar datos limpios
     df = pd.read_excel(archivo, skiprows=fila_titulos) if archivo.name.endswith('xlsx') else pd.read_csv(archivo, skiprows=fila_titulos)
     df.columns = df.columns.astype(str).str.strip()
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-    
-    # Limpiamos filas que no tengan hallazgos reales
     df = df.dropna(subset=["Hallazgos"])
 
     st.title("🛡️ Consola GRC Elite")
     tab1, tab2 = st.tabs(["📝 Verificación", "📥 Centro de Informes"])
 
     with tab1:
-        st.subheader("📋 Análisis Senior de Hallazgos")
-        
-        # Mapeo de columnas según tu Excel
+        st.subheader("📋 Análisis de Hallazgos")
         col_id = "ID" if "ID" in df.columns else df.columns[0]
         col_lin = "Lineamientos de Seguridad" if "Lineamientos de Seguridad" in df.columns else df.columns[1]
-        col_h = "Hallazgos"
         
         if st.button("🚀 EJECUTAR CONSULTORÍA L3"):
             results_v = []
-            with st.spinner("Analizando brechas..."):
+            with st.spinner("IA Analizando brechas técnicas..."):
                 for _, row in df.head(10).iterrows():
-                    hallazgo = str(row[col_h])
-                    lineamiento = str(row[col_lin])
-                    id_item = str(row[col_id])
-
-                    prompt = f"""Actúa como Auditor Senior GRC.
-                    Control: {lineamiento}
-                    Situación Encontrada: {hallazgo}
+                    h, l, idx = str(row["Hallazgos"]), str(row[col_lin]), str(row[col_id])
                     
-                    Analiza y define:
-                    1. Riesgo asociado.
-                    2. Recomendación técnica (ISO 27001).
-                    3. Brecha documental detectada."""
-
+                    prompt = f"Como Auditor GRC Senior, analiza este hallazgo: '{h}' basado en el lineamiento: '{l}'. Indica: 1. Riesgo, 2. Control ISO 27001 afectado, 3. Recomendación."
+                    
                     try:
                         model = genai.GenerativeModel('gemini-1.5-flash')
                         res = model.generate_content(prompt).text
-                        results_v.append({"header": f"ID {id_item}: {lineamiento[:50]}...", "body": res})
+                        results_v.append({"header": f"ID {idx}: {l[:50]}", "body": res})
                     except: continue
             
             st.session_state['v_data'] = results_v
             st.success("Análisis completado.")
 
     with tab2:
-        if 'v_data' in st.session_state:
-            # Generamos los bytes del PDF
-            pdf_bytes = exportar_informe("Informe de Verificación GRC", st.session_state['v_data'])
-            
-            st.download_button(
-                label="📥 Descargar Informe PDF",
-                data=pdf_bytes,
-                file_name=f"Informe_GRC_{datetime.now().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf"
-            )
+        st.subheader("📥 Exportación de Reporte")
+        # LA CLAVE: Solo mostrar el botón si hay datos, evitando el error de Streamlit
+        if 'v_data' in st.session_state and len(st.session_state['v_data']) > 0:
+            try:
+                data_pdf = generar_pdf_bytes("Informe de Auditoría GRC", st.session_state['v_data'])
+                
+                st.download_button(
+                    label="📥 Descargar Informe en PDF",
+                    data=data_pdf,
+                    file_name=f"Informe_GRC_{datetime.now().strftime('%H%M')}.pdf",
+                    mime="application/pdf",
+                    key="download_btn_unique"
+                )
+            except Exception as e:
+                st.error(f"Error al preparar el PDF: {e}")
         else:
-            st.info("Primero ejecute el análisis en la pestaña de Verificación.")
+            st.warning("⚠️ No hay análisis procesados. Regrese a la pestaña 'Verificación' y presione el botón de procesar.")
+
 else:
     st.info("👋 Por favor, carga el archivo 'prueba1.xlsx' para iniciar.")
