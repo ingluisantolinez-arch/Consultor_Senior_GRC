@@ -1,0 +1,5 @@
+streamlist
+google-generativeai
+pandas
+openpyxl
+fpdf
