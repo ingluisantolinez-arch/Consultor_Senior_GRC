@@ -1,6 +1,6 @@
-streamlist
+streamlit
 google-generativeai
 pandas
 openpyxl
-fpdf
+fpdf2
 plotly
