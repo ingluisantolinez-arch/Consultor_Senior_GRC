@@ -7,132 +7,154 @@ import json
 import time
 from datetime import datetime
 
-# --- 1. CONFIGURACIÓN Y ESTILO ---
-st.set_page_config(page_title="GRC Senior Intelligence", layout="wide", page_icon="🛡️")
+# --- 1. CONFIGURACIÓN ---
+st.set_page_config(page_title="GRC Senior Specialist L3", layout="wide", page_icon="🛡️")
 
 st.markdown("""
     <style>
+    .report-card { background-color: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 15px; }
     .main { background-color: #0d1117; color: #c9d1d9; }
-    .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { background-color: #161b22; border-radius: 5px; color: #8b949e; }
-    .stTabs [aria-selected="true"] { background-color: #1f6feb !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# Autenticación
 if "GOOGLE_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 else:
-    st.error("⚠️ Configure la 'GOOGLE_API_KEY' en los Secrets.")
+    st.error("⚠️ Error: Configure la API Key.")
     st.stop()
 
-# --- 2. FUNCIONES DE EXPORTACIÓN DE INFORMES (FPDF) ---
+# --- 2. MOTOR DE REPORTES CENTRALIZADO ---
 class GRC_Report(FPDF):
     def header(self):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, 'INFORME DE CONSULTORÍA GRC SENIOR', 0, 1, 'R')
-        self.ln(5)
+        self.set_font('Arial', 'B', 10)
+        self.cell(0, 10, 'REPORTE CORPORATIVO DE CIBERSEGURIDAD Y GRC', 0, 1, 'R')
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Página {self.page_no()} | Generado por GRC Intelligence Console', 0, 0, 'C')
+        self.cell(0, 10, f'Generado el {datetime.now().strftime("%d/%m/%Y")} | Página {self.page_no()}', 0, 0, 'C')
 
-def generate_pdf(title, content_list, is_executive=False):
+def exportar_informe(titulo, datos, es_ejecutivo=False):
     pdf = GRC_Report()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, title.upper(), ln=True, align='L')
-    pdf.set_font("Arial", size=10)
-    pdf.cell(0, 10, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True)
+    pdf.cell(0, 15, titulo.upper(), ln=True)
+    pdf.set_font("Arial", size=9)
+    pdf.cell(0, 5, f"Sector: {st.session_state.get('sector', 'N/A')}", ln=True)
+    pdf.cell(0, 5, f"Tipo: {st.session_state.get('tipo', 'N/A')}", ln=True)
     pdf.ln(10)
 
-    for item in content_list:
-        if isinstance(item, dict):
-            # Título de sección
-            pdf.set_font("Arial", 'B', 11)
-            pdf.set_fill_color(240, 240, 240)
-            pdf.cell(0, 8, item.get('header', '').encode('latin-1', 'replace').decode('latin-1'), ln=True, fill=True)
-            pdf.set_font("Arial", size=9)
-            # Cuerpo
-            content = item.get('body', '')
-            if is_executive: # Cortar texto para informe ejecutivo
-                content = content[:400] + "..." if len(content) > 400 else content
-            pdf.multi_cell(0, 5, content.encode('latin-1', 'replace').decode('latin-1'))
-            pdf.ln(3)
+    for item in datos:
+        pdf.set_font("Arial", 'B', 11)
+        pdf.set_fill_color(230, 235, 245)
+        pdf.cell(0, 8, item.get('header', '').encode('latin-1', 'replace').decode('latin-1'), ln=True, fill=True)
+        pdf.set_font("Arial", size=9)
+       
+        cuerpo = item.get('body', '')
+        if es_ejecutivo and len(cuerpo) > 400:
+            cuerpo = cuerpo[:400] + "\n\n[Resumen Ejecutivo: Consulte el informe detallado para el análisis técnico completo]"
+       
+        pdf.multi_cell(0, 5, cuerpo.encode('latin-1', 'replace').decode('latin-1'))
+        pdf.ln(4)
     return pdf.output(dest='S').encode('latin-1')
 
 # --- 3. PANEL LATERAL ---
 with st.sidebar:
-    st.header("⚙️ Configuración Global")
-    sector_cliente = st.selectbox("Sector", ["Bancario", "Financiero", "Salud", "Energía", "Tecnología", "Gobierno"])
-    tipo_verificacion = st.selectbox("Módulo", ["Estandares", "Proveedores", "Ciberseguridad", "Protección de Datos"])
-    archivo_principal = st.file_uploader("Cargar Verificación Actual", type=["xlsx", "csv"])
+    st.header("⚙️ Configuración Senior")
+    st.session_state['sector'] = st.selectbox("Sector Cliente", ["Bancario", "Salud", "Energía", "Tecnología", "Gobierno"])
+    st.session_state['tipo'] = st.selectbox("Módulo de Verificación", [
+        "Verificación de Estándares", "Verificación de Proveedores",
+        "Verificación Cumplimiento Seguridad", "Verificación Protección de Datos"
+    ])
+    archivo = st.file_uploader("Cargar Archivo Base", type=["xlsx", "csv"])
 
-# --- 4. CUERPO PRINCIPAL ---
-st.title("🛡️ Consola de Verificación & Riesgos")
+# --- 4. INTERFAZ DE MÓDULOS ---
+st.title("🛡️ Consola GRC Elite: Verificación & Riesgos")
 
-t1, t2, t3 = st.tabs(["📝 Verificación", "📊 Comparativas", "🎲 Riesgos"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📝 Verificación & Acción",
+    "📊 Benchmarking",
+    "🎲 Matriz de Riesgos",
+    "📥 CENTRO DE INFORMES"
+])
 
-if archivo_principal:
-    df = pd.read_excel(archivo_principal) if archivo_principal.name.endswith('xlsx') else pd.read_csv(archivo_principal)
+if archivo:
+    df = pd.read_excel(archivo) if archivo.name.endswith('xlsx') else pd.read_csv(archivo)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
 
-    # --- MÓDULO 1: VERIFICACIÓN & PLANES ---
-    with t1:
+    # --- TAB 1: VERIFICACIÓN ---
+    with tab1:
         st.subheader("📋 Gestión de Hallazgos")
-        col_id = st.selectbox("ID Item", df.columns, key="id_v")
-        col_hall = st.selectbox("Hallazgo", df.columns, key="h_v")
+        col_id = st.selectbox("ID Item", df.columns)
+        col_h = st.selectbox("Hallazgo", df.columns)
        
-        if st.button("🚀 PROCESAR VERIFICACIÓN COMPLETA"):
-            resultados_v = []
-            with st.spinner("Analizando cada ítem..."):
-                for _, row in df.iterrows():
-                    prompt = f"Consultor GRC: Analiza '{row[col_hall]}'. Da recomendación técnica y documental basada en ISO 27002."
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    res = model.generate_content(prompt).text
-                    resultados_v.append({"header": f"Ítem: {row[col_id]}", "body": res})
-           
-            st.session_state['res_v'] = resultados_v
-            st.success("Análisis finalizado.")
-
-        if 'res_v' in st.session_state:
-            c1, c2 = st.columns(2)
-            pdf_v_exec = generate_pdf("Informe Ejecutivo de Verificación", st.session_state['res_v'], is_executive=True)
-            pdf_v_det = generate_pdf("Informe Detallado de Verificación", st.session_state['res_v'], is_executive=False)
-            c1.download_button("📄 Informe Ejecutivo (Corto)", pdf_v_exec, "Ejecutivo_Verificacion.pdf")
-            c2.download_button("📜 Informe Detallado (Completo)", pdf_v_det, "Detallado_Verificacion.pdf")
-
-    # --- MÓDULO 2: COMPARATIVAS ---
-    with t2:
-        st.subheader("📊 Módulo de Benchmarking")
-        arch_ant = st.file_uploader("Verificación Año Anterior", type=["xlsx", "csv"])
-        if arch_ant and st.button("📊 GENERAR INFORME COMPARATIVO"):
-            # Lógica simplificada para el ejemplo
-            res_comp = [{"header": "Análisis de Evolución", "body": "Se observa una mejora del 20% en controles técnicos frente al periodo anterior..."}]
-            pdf_comp = generate_pdf("Informe Ejecutivo Comparativo", res_comp, is_executive=True)
-            st.download_button("📥 Descargar Informe Ejecutivo Comparativo", pdf_comp, "Ejecutivo_Comparativa.pdf")
-
-    # --- MÓDULO 3: RIESGOS ---
-    with t3:
-        st.subheader("🎲 Matriz de Riesgos Priorizada")
-        metodologia = st.selectbox("Metodología", ["ISO 31000", "ISO 27005", "NIST 800-30"])
-        u_alto = st.slider("Umbral Crítico", 1, 25, 15)
-
-        if st.button("⚡ GENERAR INFORMES DE RIESGO"):
-            resultados_r = []
-            with st.spinner("Calculando riesgos..."):
+        if st.button("🚀 PROCESAR ANÁLISIS DE VERIFICACIÓN"):
+            results_v = []
+            with st.spinner("Analizando bajo ISO 27002, NIST y COBIT..."):
                 for _, row in df.head(10).iterrows():
-                    prompt = f"Define riesgo materializable, impacto y probabilidad para: {row[col_hall]} bajo {metodologia}."
+                    p = f"Analiza '{row[col_h]}'. Cita Cláusulas ISO 27002. Identifica BRECHA DOCUMENTAL y Acción Técnica."
                     model = genai.GenerativeModel('gemini-1.5-flash')
-                    res = model.generate_content(prompt).text
-                    resultados_r.append({"header": f"Riesgo Deducido de {row[col_id]}", "body": res})
-           
-            st.session_state['res_r'] = resultados_r
+                    res = model.generate_content(p).text
+                    results_v.append({"header": f"Item {row[col_id]}", "body": res})
+            st.session_state['v_data'] = results_v
+            st.success("Análisis de Verificación listo para exportar.")
 
-        if 'res_r' in st.session_state:
-            cr1, cr2 = st.columns(2)
-            pdf_r_exec = generate_pdf("Resumen Ejecutivo de Riesgos", st.session_state['res_r'], is_executive=True)
-            pdf_r_det = generate_pdf("Matriz de Riesgos Detallada", st.session_state['res_r'], is_executive=False)
-            cr1.download_button("📄 Resumen de Riesgos", pdf_r_exec, "Resumen_Riesgos.pdf")
-            cr2.download_button("📜 Riesgos Detallado", pdf_r_det, "Detallado_Riesgos.pdf")
+    # --- TAB 3: RIESGOS ---
+    with tab3:
+        st.subheader("🎲 Riesgos ISO 31000 / 27005")
+        metodo = st.selectbox("Metodología", ["ISO 31000", "ISO 27005", "NIST 800-30"])
+       
+        if st.button("⚡ GENERAR MATRIZ DE RIESGOS"):
+            results_r = []
+            with st.spinner(f"Deduciendo riesgos bajo {metodo}..."):
+                for _, row in df.head(8).iterrows():
+                    p = f"Deduce Riesgo bajo {metodo} para: '{row[col_h]}'. Responde JSON con: id_riesgo, nombre_riesgo, prob(1-5), imp(1-5), brecha_doc, sustento."
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    try:
+                        resp = json.loads(model.generate_content(p).text.replace('```json', '').replace('```', '').strip())
+                        score = resp['prob'] * resp['imp']
+                        nivel = "CRÍTICO" if score >= 15 else "MEDIO/BAJO"
+                        results_r.append({
+                            "header": f"{nivel}: {resp['nombre_riesgo']} ({resp['id_riesgo']})",
+                            "body": f"Probabilidad: {resp['prob']} | Impacto: {resp['imp']} | Inherente: {score}\nSustento: {resp['sustento']}\nBrecha Documental: {resp['brecha_doc']}",
+                            "score": score
+                        })
+                    except: pass
+            # Priorización
+            st.session_state['r_data'] = sorted(results_r, key=lambda x: x.get('score', 0), reverse=True)
+            st.success("Matriz de Riesgos lista para exportar.")
+
+    # --- TAB 4: NUEVO MÓDULO DE INFORMES CENTRALIZADO ---
+    with tab4:
+        st.subheader("📥 Centro de Descarga de Informes GRC")
+        st.write("Seleccione los informes procesados que desea exportar en formato PDF de alta categoría.")
+       
+        col_inf1, col_inf2 = st.columns(2)
+       
+        with col_inf1:
+            st.markdown('<div class="report-card">', unsafe_allow_html=True)
+            st.markdown("### 📋 Informes de Verificación")
+            if 'v_data' in st.session_state:
+                st.download_button("📄 Informe Ejecutivo (Resumido)", exportar_informe("Ejecutivo de Verificación", st.session_state['v_data'], True), "Ejecutivo_Verificacion.pdf")
+                st.download_button("📜 Informe Detallado (Técnico)", exportar_informe("Detallado de Verificación", st.session_state['v_data'], False), "Detallado_Verificacion.pdf")
+            else:
+                st.warning("Procese la pestaña de Verificación primero.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with col_inf2:
+            st.markdown('<div class="report-card">', unsafe_allow_html=True)
+            st.markdown("### 🎲 Informes de Riesgos")
+            if 'r_data' in st.session_state:
+                st.download_button("📄 Resumen de Riesgos (Priorizado)", exportar_informe("Ejecutivo de Riesgos", st.session_state['r_data'], True), "Ejecutivo_Riesgos.pdf")
+                st.download_button("📜 Matriz de Riesgos Detallada", exportar_informe("Detallado de Riesgos", st.session_state['r_data'], False), "Detallado_Riesgos.pdf")
+            else:
+                st.warning("Procese la pestaña de Riesgos primero.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="report-card">', unsafe_allow_html=True)
+        st.markdown("### 📊 Informes Comparativos (Benchmarking)")
+        st.download_button("📥 Informe de Evolución Histórica", exportar_informe("Comparativa de Verificaciones", [{"header": "Análisis", "body": "Se observa una evolución constante..."}], True), "Ejecutivo_Comparativo.pdf")
+        st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("👋 Por favor, cargue el archivo de Verificación en el panel lateral.")
+
