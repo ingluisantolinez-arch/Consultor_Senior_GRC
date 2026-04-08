@@ -68,4 +68,79 @@ def llamar_ia(prompt):
     return "Error: No se pudo conectar con la IA."
 
 # --- 5. INTERFAZ PRINCIPAL ---
-st.title
+st.title("🛡️ Consola GRC Elite: Verificación & Riesgos")
+
+if archivo:
+    # Detección de fila de títulos (Fila 7 según tu archivo)
+    df_raw = pd.read_excel(archivo, header=None)
+    fila_inicio = 0
+    for i, row in df_raw.head(20).iterrows():
+        if "Hallazgos" in row.values or "ID" in row.values:
+            fila_inicio = i
+            break
+    
+    df = pd.read_excel(archivo, skiprows=fila_inicio)
+    df.columns = df.columns.astype(str).str.strip()
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    df = df.dropna(subset=["Hallazgos"])
+
+    tab1, tab2, tab3, tab4 = st.tabs(["📝 Verificación", "📊 Benchmarking", "🎲 Riesgos", "📥 INFORMES"])
+
+    with tab1:
+        st.subheader("📋 Gestión de Hallazgos e ISO 27001")
+        c_id = "ID" if "ID" in df.columns else df.columns[0]
+        c_lin = "Lineamientos de Seguridad" if "Lineamientos de Seguridad" in df.columns else df.columns[1]
+        
+        if st.button("🚀 PROCESAR ANÁLISIS DE CONSULTORÍA"):
+            results_v = []
+            with st.spinner("Analizando brechas con IA..."):
+                for _, row in df.head(10).iterrows():
+                    # Línea corregida para evitar el SyntaxError
+                    p = f"Actúa como Auditor GRC Senior. Analiza el hallazgo: '{row['Hallazgos']}' basado en el lineamiento: '{row[c_lin]}'. Indica Riesgo, Control ISO 27001 y Recomendación técnica."
+                    res_text = llamar_ia(p)
+                    results_v.append({"header": f"ID {row[c_id]}: {row[c_lin][:60]}...", "body": res_text})
+                st.session_state['v_data'] = results_v
+                st.success("Análisis completado.")
+
+    with tab3:
+        st.subheader("🎲 Matriz de Riesgos Técnica")
+        if st.button("⚡ GENERAR MATRIZ DE RIESGOS"):
+            results_r = []
+            with st.spinner("Deduciendo riesgos..."):
+                for _, row in df.head(8).iterrows():
+                    p_riesgo = f"Deduce Riesgo para: '{row['Hallazgos']}'. Responde SOLO JSON con: id_riesgo, nombre_riesgo, prob(1-5), imp(1-5), sustento."
+                    res_json = llamar_ia(p_riesgo)
+                    try:
+                        clean = res_json.replace('```json', '').replace('```', '').strip()
+                        js = json.loads(clean)
+                        score = int(js['prob']) * int(js['imp'])
+                        results_r.append({
+                            "header": f"Riesgo: {js['nombre_riesgo']} (Score: {score})",
+                            "body": f"Probabilidad: {js['prob']} | Impacto: {js['imp']}\nSustento: {js['sustento']}",
+                            "score": score
+                        })
+                    except: continue
+                st.session_state['r_data'] = sorted(results_r, key=lambda x: x.get('score', 0), reverse=True)
+                st.success("Matriz generada.")
+
+    with tab4:
+        st.subheader("📥 Centro de Exportación de Informes")
+        col_left, col_right = st.columns(2)
+        
+        with col_left:
+            st.markdown('<div class="report-card">', unsafe_allow_html=True)
+            if 'v_data' in st.session_state:
+                pdf_v = generar_pdf("Informe de Verificación GRC", st.session_state['v_data'])
+                st.download_button("📄 Descargar PDF Auditoría", pdf_v, "Auditoria_GRC.pdf", "application/pdf", key="dl_v")
+            else: st.warning("Procesa la Verificación en la Tab 1.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with col_right:
+            st.markdown('<div class="report-card">', unsafe_allow_html=True)
+            if 'r_data' in st.session_state:
+                pdf_r = generar_pdf("Matriz de Riesgos Corporativos", st.session_state['r_data'])
+                st.download_button("🎲 Descargar PDF Riesgos", pdf_r, "Matriz_Riesgos.pdf", "application/pdf", key="dl_r")
+            else: st.warning("Genera la Matriz en la Tab 3.")
+            st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("👋 Bienvenida. Por favor, carga tu archivo Excel en el panel izquierdo para comenzar.")
