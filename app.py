@@ -4,189 +4,127 @@ import pandas as pd
 import plotly.graph_objects as go
 from fpdf import FPDF
 import json
-import time
 from datetime import datetime
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="GRC Senior Specialist L3", layout="wide", page_icon="🛡️")
 
-# Estilo visual Premium
 st.markdown("""
     <style>
     .report-card { background-color: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 15px; }
     .main { background-color: #0d1117; color: #c9d1d9; }
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { background-color: #161b22; border-radius: 5px; color: #8b949e; }
     </style>
     """, unsafe_allow_html=True)
 
-# Autenticación con Secrets
 if "GOOGLE_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 else:
-    st.error("⚠️ Configure la 'GOOGLE_API_KEY' en los Secrets de Streamlit.")
+    st.error("⚠️ Configure la 'GOOGLE_API_KEY' en los Secrets.")
     st.stop()
 
-# --- 2. MOTOR DE REPORTES (COMPATIBLE CON FPDF2) ---
+# --- 2. MOTOR DE REPORTES (FPDF2) ---
 class GRC_Report(FPDF):
     def header(self):
         self.set_font('Helvetica', 'B', 10)
         self.set_text_color(100, 100, 100)
-        self.cell(0, 10, 'REPORTE CORPORATIVO GRC - NIVEL SENIOR', 0, 1, 'R')
+        self.cell(0, 10, 'REPORTE CORPORATIVO GRC - CONFIDENCIAL', 0, 1, 'R')
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Helvetica', 'I', 8)
         self.cell(0, 10, f'Generado el {datetime.now().strftime("%d/%m/%Y")} | Página {self.page_no()}', 0, 0, 'C')
 
-def exportar_informe(titulo, datos, es_ejecutivo=False):
+def exportar_informe(titulo, datos):
     pdf = GRC_Report()
     pdf.add_page()
-    
-    # Título Principal
     pdf.set_font("Helvetica", 'B', 16)
     pdf.set_text_color(31, 111, 235) 
     pdf.cell(0, 15, titulo.upper(), ln=True)
-    
-    # Metadatos
-    pdf.set_font("Helvetica", size=9)
-    pdf.set_text_color(0, 0, 0)
-    pdf.cell(0, 5, f"Sector: {st.session_state.get('sector', 'N/A')}", ln=True)
-    pdf.cell(0, 5, f"Módulo: {st.session_state.get('tipo', 'N/A')}", ln=True)
-    pdf.ln(10)
+    pdf.ln(5)
 
     for item in datos:
         pdf.set_font("Helvetica", 'B', 11)
         pdf.set_fill_color(230, 235, 245)
         pdf.multi_cell(0, 8, txt=item.get('header', ''), fill=True)
-        
         pdf.set_font("Helvetica", size=9)
-        cuerpo = item.get('body', '')
-        if es_ejecutivo and len(cuerpo) > 500:
-            cuerpo = cuerpo[:500] + "\n\n[Nota: Ver informe detallado para el análisis técnico completo]"
-        
-        pdf.multi_cell(0, 5, txt=cuerpo)
+        pdf.multi_cell(0, 5, txt=item.get('body', ''))
         pdf.ln(4)
-    
     return pdf.output()
 
-# --- 3. PANEL LATERAL ---
+# --- 3. PANEL LATERAL & CARGA ---
 with st.sidebar:
     st.header("⚙️ Configuración Senior")
-    st.session_state['sector'] = st.selectbox("Sector Cliente", ["Bancario", "Salud", "Energía", "Tecnología", "Gobierno"])
-    st.session_state['tipo'] = st.selectbox("Módulo de Verificación", [
-        "Verificación de Estándares", "Verificación de Proveedores",
-        "Verificación Cumplimiento Seguridad", "Verificación Protección de Datos"
-    ])
-    archivo = st.file_uploader("Cargar Archivo (Excel/CSV)", type=["xlsx", "csv"])
+    sector = st.selectbox("Sector Cliente", ["Bancario", "Salud", "Energía", "Tecnología", "Gobierno"])
+    archivo = st.file_uploader("Cargar prueba1.xlsx", type=["xlsx", "csv"])
 
-# --- 4. INTERFAZ PRINCIPAL ---
-st.title("🛡️ Consola GRC Elite: Verificación & Riesgos")
-
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📝 Verificación & Acción", 
-    "📊 Benchmarking", 
-    "🎲 Matriz de Riesgos", 
-    "📥 CENTRO DE INFORMES"
-])
-
+# --- 4. LÓGICA DE PROCESAMIENTO ---
 if archivo:
-    # Carga y limpieza de datos
-    df = pd.read_excel(archivo) if archivo.name.endswith('xlsx') else pd.read_csv(archivo)
-    df.columns = df.columns.astype(str).str.strip() # Limpieza de espacios en nombres
-    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    # Leemos sin encabezados primero para detectar la fila real de títulos
+    df_raw = pd.read_excel(archivo, header=None) if archivo.name.endswith('xlsx') else pd.read_csv(archivo, header=None)
     
-    cols_disponibles = df.columns.tolist()
+    # Buscamos la fila que contiene la palabra "Hallazgos" o "ID" (Típicamente fila 7 en tu archivo)
+    fila_titulos = 0
+    for i, row in df_raw.head(15).iterrows():
+        if "Hallazgos" in row.values or "ID" in row.values:
+            fila_titulos = i
+            break
+    
+    # Recargamos el dataframe con la cabecera correcta
+    df = pd.read_excel(archivo, skiprows=fila_titulos) if archivo.name.endswith('xlsx') else pd.read_csv(archivo, skiprows=fila_titulos)
+    df.columns = df.columns.astype(str).str.strip()
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    df = df.dropna(subset=["Hallazgos"]) # Solo procesar filas que tengan hallazgos escritos
 
-    # Función de detección inteligente de columnas
-    def detectar_columna(lista_cols, keywords):
-        for col in lista_cols:
-            if any(key in col.lower() for key in keywords):
-                return col
-        return lista_cols[0] if lista_cols else None
+    st.title("🛡️ Consola GRC Elite")
+    tab1, tab2 = st.tabs(["📝 Verificación de Hallazgos", "📥 Centro de Informes"])
 
-    # Sugerencias automáticas
-    col_id_sug = detectar_columna(cols_disponibles, ["id", "item", "codigo", "no.", "nro"])
-    col_h_sug = detectar_columna(cols_disponibles, ["hallazgo", "descripcion", "evidencia", "observacion", "detalle"])
-
-    # --- TAB 1: VERIFICACIÓN ---
     with tab1:
-        st.subheader("📋 Gestión de Hallazgos y Acciones")
-        c1, c2 = st.columns(2)
-        with c1:
-            col_id = st.selectbox("ID / Referencia", cols_disponibles, 
-                                  index=cols_disponibles.index(col_id_sug) if col_id_sug in cols_disponibles else 0,
-                                  key="sel_id")
-        with c2:
-            col_h = st.selectbox("Columna de Hallazgo / Descripción", cols_disponibles, 
-                                 index=cols_disponibles.index(col_h_sug) if col_h_sug in cols_disponibles else 0,
-                                 key="sel_h")
+        st.subheader("📋 Análisis de Brechas (ISO 27001/2 / NIST)")
         
-        if st.button("🚀 PROCESAR ANÁLISIS DE VERIFICACIÓN"):
+        # Detección automática de columnas críticas según tu archivo
+        col_id = st.selectbox("Columna ID", df.columns, index=df.columns.get_loc("ID") if "ID" in df.columns else 0)
+        col_lin = st.selectbox("Columna Lineamiento", df.columns, index=df.columns.get_loc("Lineamientos de Seguridad") if "Lineamientos de Seguridad" in df.columns else 0)
+        col_h = st.selectbox("Columna Hallazgos", df.columns, index=df.columns.get_loc("Hallazgos") if "Hallazgos" in df.columns else 0)
+
+        if st.button("🚀 EJECUTAR CONSULTORÍA DE NIVEL 3"):
             results_v = []
-            if col_h in df.columns:
-                df_clean = df.dropna(subset=[col_h])
-                with st.spinner("Mapeando hallazgos con IA..."):
-                    for _, row in df_clean.head(10).iterrows():
-                        p = f"Analiza: '{row[col_h]}'. Cita Cláusulas ISO 27002:2022. Identifica BRECHA DOCUMENTAL y Acción Técnica sugerida."
-                        try:
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            res = model.generate_content(p).text
-                            results_v.append({"header": f"Referencia: {row[col_id]}", "body": res})
-                        except: continue
-                st.session_state['v_data'] = results_v
-                st.success("Análisis de Verificación completado.")
-            else:
-                st.error("Columna de hallazgo no válida.")
+            with st.spinner("IA Analizando brechas técnicas y normativas..."):
+                # Procesamos solo los primeros 10 para eficiencia
+                for _, row in df.head(10).iterrows():
+                    hallazgo = str(row[col_h])
+                    lineamiento = str(row[col_lin])
+                    id_item = str(row[col_id])
 
-    # --- TAB 3: RIESGOS ---
-    with tab3:
-        st.subheader("🎲 Riesgos ISO 27005 / NIST")
-        if st.button("⚡ GENERAR MATRIZ DE RIESGOS"):
-            results_r = []
-            if col_h in df.columns:
-                df_clean = df.dropna(subset=[col_h])
-                with st.spinner("Deduciendo riesgos técnicos..."):
-                    for _, row in df_clean.head(8).iterrows():
-                        p = f"Deduce Riesgo para: '{row[col_h]}'. Responde SOLO JSON con: id_riesgo, nombre_riesgo, prob(1-5), imp(1-5), brecha_doc, sustento."
-                        try:
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            raw = model.generate_content(p).text
-                            clean_json = raw.replace('```json', '').replace('```', '').strip()
-                            resp = json.loads(clean_json)
-                            score = int(resp['prob']) * int(resp['imp'])
-                            nivel = "CRÍTICO" if score >= 15 else "MEDIO" if score >= 8 else "BAJO"
-                            results_r.append({
-                                "header": f"{nivel}: {resp['nombre_riesgo']} (Inherente: {score})",
-                                "body": f"Probabilidad: {resp['prob']} | Impacto: {resp['imp']}\nBrecha: {resp['brecha_doc']}\nAnálisis: {resp['sustento']}",
-                                "score": score
-                            })
-                        except: continue
-                st.session_state['r_data'] = sorted(results_r, key=lambda x: x.get('score', 0), reverse=True)
-                st.success("Matriz de Riesgos generada.")
+                    # PROMPT SENIOR: Compara lo que debería ser (Lineamiento) vs lo que es (Hallazgo)
+                    prompt = f"""Actúa como un Auditor Senior de Ciberseguridad L3.
+                    Sector: {sector}.
+                    Lineamiento de Seguridad esperado: {lineamiento}
+                    Hallazgo encontrado: {hallazgo}
 
-    # --- TAB 4: CENTRO DE INFORMES ---
-    with tab4:
-        st.subheader("📥 Exportación de Entregables")
-        c1, c2 = st.columns(2)
-        
-        with c1:
-            st.markdown('<div class="report-card">', unsafe_allow_html=True)
-            st.markdown("### 📋 Informes de Verificación")
-            if 'v_data' in st.session_state:
-                pdf_v = exportar_informe("Informe de Verificación GRC", st.session_state['v_data'], False)
-                st.download_button("📥 Bajar Informe Técnico", data=pdf_v, file_name="Auditoria_Tecnica.pdf", mime="application/pdf")
-            else: st.warning("Procese Verificación primero.")
-            st.markdown('</div>', unsafe_allow_html=True)
+                    Tarea:
+                    1. Mapea la brecha específica contra controles ISO 27002:2022 o NIST SP 800-53.
+                    2. Define la ACCIÓN TÉCNICA inmediata para remediar.
+                    3. Define la BRECHA DOCUMENTAL (qué política o estándar falta).
+                    Responde de forma ejecutiva y técnica."""
 
-        with c2:
-            st.markdown('<div class="report-card">', unsafe_allow_html=True)
-            st.markdown("### 🎲 Informes de Riesgos")
-            if 'r_data' in st.session_state:
-                pdf_r = exportar_informe("Matriz de Riesgos Corporativos", st.session_state['r_data'], False)
-                st.download_button("📥 Bajar Matriz de Riesgos", data=pdf_r, file_name="Matriz_Riesgos.pdf", mime="application/pdf")
-            else: st.warning("Procese Riesgos primero.")
-            st.markdown('</div>', unsafe_allow_html=True)
+                    try:
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        res = model.generate_content(prompt).text
+                        results_v.append({"header": f"ITEM {id_item}: {lineamiento[:80]}...", "body": res})
+                        st.markdown(f"**Análisis Item {id_item} finalizado.**")
+                    except: continue
+            
+            st.session_state['v_data'] = results_v
+            st.success("Análisis Senior Finalizado.")
+
+    with tab2:
+        st.subheader("📥 Exportación")
+        if 'v_data' in st.session_state:
+            pdf_data = exportar_informe(f"Informe GRC - Sector {sector}", st.session_state['v_data'])
+            st.download_button("📥 Descargar Informe de Auditoría PDF", data=pdf_data, file_name="Consultoria_Senior_GRC.pdf", mime="application/pdf")
+        else:
+            st.info("Procese datos en la pestaña de Verificación para generar el informe.")
 
 else:
-    st.info("👋 Bienvenida a la consola GRC. Por favor, cargue su archivo Excel para comenzar.")
+    st.title("🛡️ Consola GRC Elite")
+    st.info("👋 Por favor, carga tu archivo 'prueba1.xlsx' para detectar los lineamientos y hallazgos.")
